@@ -13,8 +13,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Docker Hub target, e.g. mindmorass/devkit. Set as a repo VARIABLE.
-  IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+  # Docker Hub target image. Hardcoded (fixed personal image); only the Docker
+  # Hub credentials are secrets (DOCKERHUB_USERNAME / DOCKERHUB_TOKEN).
+  IMAGE: mindmorass/devkit
 
 jobs:
   build:

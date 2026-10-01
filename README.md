@@ -74,11 +74,11 @@ docker run --rm -p 8080:8080 \
 ## CI / publishing
 
 `.github/workflows/build.yml` builds multi-arch (amd64+arm64) and pushes to
-Docker Hub on pushes to `main` and `v*` tags. Configure in the GitHub repo:
+Docker Hub on pushes to `main` and `v*` tags. The image name is hardcoded
+(`mindmorass/devkit`), so only two **secrets** are needed in the GitHub repo:
 
 - **Secret** `DOCKERHUB_USERNAME` — Docker Hub account username
 - **Secret** `DOCKERHUB_TOKEN` — Docker Hub Personal Access Token (Read & Write)
-- **Variable** `DOCKERHUB_IMAGE` — e.g. `mindmorass/devkit`
 
 ## Build locally
 
