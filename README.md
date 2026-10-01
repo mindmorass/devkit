@@ -1,103 +1,88 @@
-# docker-proxy
+# devkit
 
-A small, discreet HTTP(S) + SOCKS4/5 proxy in a single container. The proxy
-([3proxy](https://github.com/3proxy/3proxy)) is **compiled from source** inside
-the image — the only base image used is official Alpine. Final image is ~8–12 MB.
+A developer toolbox container (Ubuntu 24.04, CLI-first) that you shell into.
+It bundles API-testing, networking/diagnostic, defensive-security, and AI CLIs,
+plus a built-from-source **HTTP(S)+SOCKS proxy** (3proxy) and **gost** for
+proxy-compatibility and egress testing.
 
-- **HTTP(S) proxy** (CONNECT tunneling) on `:3128`
-- **SOCKS4/5** on `:1080`
-- Username/password auth, source-IP restriction, or (opt-in) open relay
-- Config from environment variables, or a bind-mounted config file
-- Runs as a non-root user, foreground, under `tini`
+> It is a *toolbox you exec into*, not a long-running service. The proxy is
+> opt-in via `start-proxy`.
 
-> This is a **relay/forward proxy**, not a MITM/TLS-inspecting proxy. HTTPS is
-> tunneled opaquely via `CONNECT` and SOCKS relays raw TCP — the proxy never
-> decrypts traffic. With `ANONYMOUS=1`, plaintext HTTP requests carry no
-> `Via` / `X-Forwarded-For` headers; HTTPS and SOCKS add no proxy headers at all.
+## Why a local proxy in here (legitimate uses)
 
-## Build
+- **Proxy-compatibility testing** — verify an app honors `HTTP_PROXY`/`ALL_PROXY`/
+  `NO_PROXY`, handles `407`, and works over CONNECT. `start-proxy` is a
+  reproducible fixture for CI.
+- **Egress allowlist / firewall verification** on locked-down hosts — route test
+  traffic through one auditable chokepoint and read the CONNECT log.
+- **Single known egress identity** for a fleet of test containers.
+- **SOCKS bastion** to internal-only services (containerized `ssh -D`).
+- **Outbound-call observability** — see every host a test suite contacts.
 
-```sh
-docker build -t docker-proxy .
-# multi-arch:
-docker buildx build --platform linux/amd64,linux/arm64 -t docker-proxy .
-```
+## Install policy
 
-## Run
+apt first; then pinned vendor **binaries**; then **Go/Node/Python**; **Homebrew**
+only for what apt doesn't carry. Homebrew runs as the non-root `dev` user. On
+arm64, brew formulae without bottles build from source, so the brew list is kept
+deliberately short (`glow`, `gum`).
 
-**With username/password auth (recommended for any exposed host):**
+## What's inside
 
-```sh
-docker run -d --name proxy -p 3128:3128 -p 1080:1080 \
-  -e PROXY_USER=admin -e PROXY_PASS='s3cret' -e ANONYMOUS=1 \
-  docker-proxy
-```
+| Category | Tools |
+|---|---|
+| API / HTTP | `curl` `wget` `httpie` `xh` `hurl` `newman` `grpcurl` `websocat` `jq` `yq` |
+| Proxies | `3proxy` (ours) · `gost` · `mitmproxy`/`mitmdump`/`mitmweb` |
+| Net diag | `nmap` `ncat` `tcpdump` `mtr` `dig` `whois` `openssl` `iperf3` `socat` `testssl.sh` |
+| Security (defensive) | `trivy` `gitleaks` `semgrep` `nuclei` `mkcert` |
+| Core dev | `git` `git-lfs` `gh` `docker` (CLI) `nvim` `tmux` `zsh` `ripgrep` `fd` `bat` `eza` `fzf` `direnv` `lazygit` `glow` `gum` |
+| Languages | Node 22 · Go 1.27 · Python 3 + `uv` |
+| AI | GitHub Copilot CLI (`copilot`) · OpenAI Codex CLI (`codex`) |
 
-```sh
-curl -x http://admin:s3cret@localhost:3128 https://ifconfig.me   # HTTP proxy
-curl --socks5 admin:s3cret@localhost:1080  https://ifconfig.me   # SOCKS5
-```
 
-**No password, restricted to a source network (e.g. Tailscale / LAN):**
-
-```sh
-docker run -d -p 3128:3128 -p 1080:1080 \
-  -e ALLOW_CIDR=100.64.0.0/10 docker-proxy
-```
-
-**Mounted config (full control; env is ignored when this file exists):**
+## Use
 
 ```sh
-docker run -d -p 3128:3128 -p 1080:1080 \
-  -v "$PWD/3proxy.cfg:/etc/3proxy/3proxy.cfg:ro" docker-proxy
+# Shell into the toolbox (mounts your cwd and the docker socket)
+docker run -it --rm \
+  -v "$PWD:/home/dev/work" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  mindmorass/devkit
+
+# Run a single tool non-interactively
+docker run --rm -v "$PWD:/home/dev/work" mindmorass/devkit newman run collection.json
 ```
 
-See `3proxy.cfg.example` for the file format, and `docker-compose.yml` for a
-hardened (read-only rootfs, dropped caps) example.
+### The proxy (`start-proxy`)
 
-## Access control
+```sh
+# 3proxy (default engine): HTTP :3128 + SOCKS :1080, password auth
+docker run --rm -p 3128:3128 -p 1080:1080 \
+  -e PROXY_USER=u -e PROXY_PASS=p -e ANONYMOUS=1 \
+  mindmorass/devkit start-proxy
 
-The entrypoint **refuses to start as an accidental open relay**. You must pick
-exactly one mode:
+# gost engine: HTTP+SOCKS on one port; set GOST_LISTEN for TLS/WS transports
+docker run --rm -p 8080:8080 \
+  -e PROXY_ENGINE=gost -e PROXY_USER=u -e PROXY_PASS=p \
+  mindmorass/devkit start-proxy
+```
 
-| Mode | Set | 3proxy auth | Who may connect |
-|------|-----|-------------|-----------------|
-| Password | `PROXY_USER` + `PROXY_PASS` | `strong` | anyone with valid credentials |
-| Source IP | `ALLOW_CIDR` | `iponly` | any client within the CIDR(s) |
-| Open relay | `ALLOW_OPEN=1` | `none` | **anyone** (dangerous) |
+`start-proxy` **refuses to start as an accidental open relay** — set
+`PROXY_USER`+`PROXY_PASS`, or `ALLOW_CIDR` (source-IP restriction), or
+`ALLOW_OPEN=1` (deliberate). See the script header for all env vars; a mounted
+`/etc/3proxy/3proxy.cfg` is used verbatim (env ignored).
 
-`ALLOW_CIDR` accepts a comma-separated list (e.g. `100.64.0.0/10,192.168.0.0/16`).
-If `PROXY_USER` and `ALLOW_CIDR` are both set, clients must satisfy **both**.
+## CI / publishing
 
-## Environment variables
+`.github/workflows/build.yml` builds multi-arch (amd64+arm64) and pushes to
+Docker Hub on pushes to `main` and `v*` tags. Configure in the GitHub repo:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PROXY_USER` / `PROXY_PASS` | — | Enable password auth (both required together) |
-| `ALLOW_CIDR` | — | Restrict by source network(s); comma-separated |
-| `ALLOW_OPEN` | `0` | `1` = run a deliberate open relay (no ACL) |
-| `ANONYMOUS` | `0` | `1` = strip `Via`/`X-Forwarded-For` from HTTP |
-| `HTTP_PORT` | `3128` | HTTP proxy port |
-| `SOCKS_PORT` | `1080` | SOCKS port |
-| `ENABLE_HTTP` | `1` | `0` = disable the HTTP listener |
-| `ENABLE_SOCKS` | `1` | `0` = disable the SOCKS listener |
-| `BIND_ADDR` | `0.0.0.0` | Listener bind address |
-| `NAMESERVER` | — | Upstream DNS server for 3proxy's resolver |
-| `NSCACHE` | `65536` | DNS cache size (bytes) |
-| `MAXCONN` | `200` | Max concurrent connections per service |
+- **Secret** `DOCKERHUB_USERNAME` — Docker Hub account username
+- **Secret** `DOCKERHUB_TOKEN` — Docker Hub Personal Access Token (Read & Write)
+- **Variable** `DOCKERHUB_IMAGE` — e.g. `mindmorass/devkit`
 
-## Build arguments
+## Build locally
 
-| Arg | Default | Description |
-|-----|---------|-------------|
-| `ALPINE_VERSION` | `3.21` | Base image tag |
-| `THREEPROXY_VERSION` | `1.0.0` | 3proxy release to build |
-| `THREEPROXY_SHA256` | (pinned) | Source tarball checksum (verified at build) |
-
-## Notes
-
-- 3proxy is built **without** TLS/PCRE/PAM — a forward proxy tunnels TLS, it
-  doesn't terminate it, so no crypto libraries are needed. This keeps the image
-  minimal and the attack surface small.
-- There is no `daemon` directive: 3proxy runs in the foreground and `tini`
-  forwards signals, so `docker stop` is immediate and clean.
+```sh
+docker build -t devkit .
+docker buildx build --platform linux/amd64,linux/arm64 -t devkit .
+```
