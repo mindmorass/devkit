@@ -1,0 +1,4 @@
+# local build/test scratch
+*.log
+*.tar.gz
+.env

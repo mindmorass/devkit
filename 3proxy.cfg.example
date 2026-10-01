@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# docker-proxy reference config.
+#
+# Bind-mount this file to /etc/3proxy/3proxy.cfg to take FULL control; when
+# present it is used verbatim and ALL environment variables are ignored:
+#
+#   docker run -v $PWD/3proxy.cfg:/etc/3proxy/3proxy.cfg:ro ... docker-proxy
+#
+# Config directives are order-sensitive: resolver/cache/users/auth/ACLs must
+# come BEFORE the proxy/socks service lines.
+# ---------------------------------------------------------------------------
+
+# DNS: resolve via these servers and cache results (avoids libc gethostbyname).
+nserver 1.1.1.1
+nserver 8.8.8.8
+nscache 65536
+
+timeouts 1 5 30 60 180 1800 15 60
+maxconn 200
+
+# Log to container stdout (docker logs). Drop this block for near-silent running.
+log /dev/stdout
+logformat "- %t.%. %N.%p %E %U %C:%c %R:%r %O %I %T"
+
+# --- Authentication: pick ONE of the three blocks below ---
+
+# (a) Username/password (recommended for any exposed deployment):
+users admin:CL:changeme
+auth strong
+allow *
+
+# (b) No password, restrict by source network (good for Tailscale/LAN).
+#     Uncomment this block and remove block (a).
+# auth iponly
+# allow * 100.64.0.0/10,192.168.0.0/16
+# deny *
+
+# (c) Open relay — NO access control. Dangerous; only behind a trusted network.
+# auth none
+
+# --- Services ---
+# -a makes the HTTP proxy anonymous (strips Via / X-Forwarded-For).
+proxy -a -i0.0.0.0 -p3128
+socks -i0.0.0.0 -p1080

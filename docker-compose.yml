@@ -1,0 +1,36 @@
+services:
+  proxy:
+    build: .
+    # Or use a prebuilt image you pushed:
+    # image: your-registry/docker-proxy:1.0.0
+    restart: unless-stopped
+    ports:
+      - "3128:3128"   # HTTP(S) proxy (CONNECT)
+      - "1080:1080"   # SOCKS4/5
+    environment:
+      # --- Pick an access-control mode (see README) ---
+      PROXY_USER: "admin"
+      PROXY_PASS: "change-me-please"
+      # ALLOW_CIDR: "100.64.0.0/10"   # instead of user/pass: restrict by source
+      # ALLOW_OPEN: "1"               # deliberate open relay (dangerous)
+
+      # --- Optional tuning ---
+      ANONYMOUS: "1"                  # strip identifying HTTP headers
+      # NAMESERVER: "1.1.1.1"
+      # HTTP_PORT: "3128"
+      # SOCKS_PORT: "1080"
+      # ENABLE_HTTP: "1"
+      # ENABLE_SOCKS: "1"
+
+    # Hardening: read-only root FS; entrypoint renders config into a tmpfs.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # To take full control, mount your own config (env is then ignored):
+    # volumes:
+    #   - ./3proxy.cfg:/etc/3proxy/3proxy.cfg:ro
